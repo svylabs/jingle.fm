@@ -20,6 +20,13 @@ const App = () => {
     };
   }, []);
 
+  useEffect(() => {
+    console.log(commits);
+    if (commits && commits.length > 0) {
+      playMusicAndDrumsFromCommits(commits);
+    }
+  }, [commits]);
+
   const playNote = (frequency, duration) => {
     const oscillator = audioContext.createOscillator();
     const gainNode = audioContext.createGain();
@@ -58,8 +65,8 @@ const App = () => {
   const calculateNoteDuration = (commitTime, nextCommitTime, firstCommitTime, lastCommitTime) => {
     const timeDifferenceInSeconds = (new Date(nextCommitTime) - new Date(commitTime)) / 1000;
     const totalDurationInSeconds = (new Date(lastCommitTime) - new Date(firstCommitTime)) / 1000;
-    console.log("TimeDiff: ", timeDifferenceInSeconds, "Total Duration: ", totalDurationInSeconds);
-    return (timeDifferenceInSeconds / totalDurationInSeconds) * 30000; // Map the note duration to fit within one minute
+    //console.log("TimeDiff: ", timeDifferenceInSeconds, "Total Duration: ", totalDurationInSeconds);
+    return (timeDifferenceInSeconds / totalDurationInSeconds) * 20000; // Map the note duration to fit within one minute
   };
 
 
@@ -70,11 +77,9 @@ const App = () => {
     return (A4Frequency * semitoneRatio +  ((i * 200) % 2400 || 200));
   };
 
-  const calculateDrumFrequency = async (commitSha) => {
+  const calculateDrumFrequency = async (commit) => {
     try {
-      const response = await axios.get(`https://api.github.com/repos/${repository}/commits/${commitSha}`);
-      const commitDetails = response.data;
-      const numFilesChanged = commitDetails.files.length;
+      const numFilesChanged = commit.files.length;
       return 50 + numFilesChanged * 10; // Adjust multiplier and base frequency as needed
     } catch (error) {
       console.error('Error fetching commit details:', error);
@@ -87,13 +92,16 @@ const App = () => {
       setIsLoading(true);
       const response = await axios.get(`https://api.github.com/repos/${repository}/commits?per_page=100`);
       let allCommits = [...response.data];
+      let i = 0;
       let nextPage = getNextPage(response.headers.link);
-      while (nextPage) {
+      while (nextPage && i < 10) {
+        i++;
         const nextPageResponse = await axios.get(nextPage);
         allCommits = [...allCommits, ...nextPageResponse.data];
         nextPage = getNextPage(nextPageResponse.headers.link);
       }
       allCommits = allCommits.reverse();
+      console.log(allCommits);
       setCommits(allCommits);
     } catch (error) {
       console.error('Error fetching commits:', error);
@@ -115,14 +123,31 @@ const App = () => {
     return null;
   };
 
-  const playMusicAndDrumsFromCommits = async () => {
+  const fetchCommitDetails = async (commitSha) => {
+    try {
+      const response = await axios.get(`https://api.github.com/repos/${repository}/commits/${commitSha}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching commit details:', error);
+      return null;
+    }
+  }
+
+  const playMusicAndDrumsFromCommits = async (commits) => {
     const firstCommitTime = commits[0].commit.author.date;
     const lastCommitTime = commits[commits.length - 1].commit.author.date;
     let totalDuration = (new Date(lastCommitTime) - new Date(firstCommitTime)) / 1000;
+    let notes = [
+      // { 'note': [fqy, duration], 'drum': [] }
+    ]
 
     for (let i = 0; i < commits.length; i++) {
+        let note = {};
         const commit = commits[i];
         const sha = commit.sha;
+        console.log("Commit: ", commit);
+        const commitDetails = await fetchCommitDetails(sha);
+        commit.files = commitDetails.files;
         //const noteValue = parseInt(sha.substr(0, 1), 16);
         const commitId = parseInt(sha.substr(0, 4), 16);
         const noteValue =  (i * i * i * i) % 16;
@@ -130,13 +155,19 @@ const App = () => {
         const nextCommitTime = i === commits.length - 1 ? new Date() : commits[i + 1].commit.author.date;
         if (i < commits.length - 1) {
           const noteDuration = calculateNoteDuration(commit.commit.author.date, nextCommitTime, firstCommitTime, lastCommitTime);
-          playNote(frequency, noteDuration);
+          note.note = [frequency, noteDuration];
+          const drumFrequency = await calculateDrumFrequency(commit);
+          const drumDuration = calculateNoteDuration(commit.commit.author.date, nextCommitTime, firstCommitTime, lastCommitTime);
+          note.drum = [drumFrequency, drumDuration];
+          notes.push(note);
         }
+    }
 
-        //const drumFrequency = await calculateDrumFrequency(commit.sha);
-        //const drumDuration = calculateNoteDuration(commit.commit.author.date, nextCommitTime, firstCommitTime, lastCommitTime);
-
-        //playDrum(drumFrequency, drumDuration);
+    for (let i = 0; i < notes.length; i++) {
+      const note = notes[i].note;
+      const drum = notes[i].drum;
+      playNote(note[0], note[1]);
+      playDrum(drum[0], drum[1]);
     }
 };
 
@@ -150,7 +181,6 @@ const App = () => {
       //const commits = response.data;
       await fetchAllCommits();
       console.log("Commits: ", commits);
-      playMusicAndDrumsFromCommits(commits);
     } catch (error) {
       console.error('Error fetching commits:', error);
       setError('Error fetching commits. Please check the repository name.');
