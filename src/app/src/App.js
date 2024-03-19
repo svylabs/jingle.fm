@@ -4,12 +4,15 @@ import './App.css';
 
 const App = () => {
   const [repository, setRepository] = useState('');
+  const [commitsRepository, setCommitsRepository] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [commits, setCommits] = useState([]);
   const [authenticated, setAuthenticated] = useState(false);
   const [promptAuthentication, setPromptAuthentication] = useState(false);
   const [user, setUser] = useState({});
+  const [totalDuration, setTotalDuration] = useState(20000);
+  let githubAuthToken = localStorage.getItem('githubAuthToken');
 
   const [audioContext, setAudioContext] = useState(null);
 
@@ -22,6 +25,7 @@ const App = () => {
         if (user) {
           setAuthenticated(true);
           localStorage.setItem('githubAuthToken', user.access_token);
+          githubAuthToken = user.access_token;
           localStorage.setItem('userDetails', JSON.stringify(user));
           setUser(user);
         }
@@ -80,7 +84,7 @@ const App = () => {
     const timeDifferenceInSeconds = (new Date(nextCommitTime) - new Date(commitTime)) / 1000;
     const totalDurationInSeconds = (new Date(lastCommitTime) - new Date(firstCommitTime)) / 1000;
     //console.log("TimeDiff: ", timeDifferenceInSeconds, "Total Duration: ", totalDurationInSeconds);
-    return (timeDifferenceInSeconds / totalDurationInSeconds) * 20000; // Map the note duration to fit within one minute
+    return (timeDifferenceInSeconds / totalDurationInSeconds) * totalDuration; // Map the note duration to fit within one minute
   };
 
 
@@ -104,7 +108,7 @@ const App = () => {
   const fetchAllCommits = async () => {
     try {
       setIsLoading(true);
-      const response = await axios(`https://api.github.com/repos/${repository}/commits?per_page=100`);
+      const response = await axios(`https://api.github.com/repos/${repository}/commits?per_page=100`,  githubAuthToken ? { headers: { Authorization: `Bearer ${githubAuthToken}` }} : {});
       let allCommits = [...response.data];
       let i = 0;
       let nextPage = getNextPage(response.headers.link);
@@ -146,7 +150,7 @@ const App = () => {
 
   const fetchCommitDetails = async (commitSha) => {
     try {
-      const response = await axios.get(`https://api.github.com/repos/${repository}/commits/${commitSha}`);
+      const response = await axios.get(`https://api.github.com/repos/${repository}/commits/${commitSha}`,  githubAuthToken ? { headers: { Authorization: `Bearer ${githubAuthToken}` }} : {});
       return response.data;
     } catch (error) {
       console.error('Error fetching commit details:', error);
@@ -157,7 +161,6 @@ const App = () => {
   const playMusicAndDrumsFromCommits = async (commits) => {
     const firstCommitTime = commits[0].commit.author.date;
     const lastCommitTime = commits[commits.length - 1].commit.author.date;
-    let totalDuration = (new Date(lastCommitTime) - new Date(firstCommitTime)) / 1000;
     let notes = [
       // { 'note': [fqy, duration], 'drum': [] }
     ]
@@ -167,8 +170,7 @@ const App = () => {
         const commit = commits[i];
         const sha = commit.sha;
         console.log("Commit: ", commit);
-        const commitDetails = await fetchCommitDetails(sha);
-        commit.files = commitDetails.files;
+        commit.files = commit.commitDetails.files;
         //const noteValue = parseInt(sha.substr(0, 1), 16);
         const commitId = parseInt(sha.substr(0, 4), 16);
         const noteValue =  (i * i * i * i) % 16;
@@ -193,15 +195,23 @@ const App = () => {
 };
 
   const handleSubmit = async (e) => {
+    if (repository === commitsRepository) return;
     e.preventDefault();
     setIsLoading(true);
-    setError(null);
+    setError("Fetching repo details... Please wait..");
     
     try {
       //const response = await axios.get(`https://api.github.com/repos/${repository}/commits`);
       //const commits = response.data;
       await fetchAllCommits();
+      setError("Fetching commit details... Please wait..");
+      for (const commit of commits) {
+        const sha = commit.sha;
+        const commitDetails = await fetchCommitDetails(sha);
+        commit.commitDetails = commitDetails;
+      }
       console.log("Commits: ", commits);
+      setCommitsRepository(repository);
     } catch (error) {
       console.error('Error fetching commits:', error);
       setError('Error fetching commits. Please check the repository name.');
@@ -214,6 +224,8 @@ const App = () => {
     <div className="App">
       {authenticated && user &&  <h3>Welcome, {user.login}</h3>}
       <h1>Tune for your repo</h1>
+      <label>Total Duration(in seconds)</label>
+      <input type="text" value={totalDuration / 1000} onChange={(e) => setTotalDuration(parseInt(e.target.value) * 1000)} />
       <form onSubmit={handleSubmit}>
         <label htmlFor="repository">Repository:</label>
         <input 
