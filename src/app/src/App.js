@@ -7,11 +7,25 @@ const App = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [commits, setCommits] = useState([]);
+  const [authenticated, setAuthenticated] = useState(false);
+  const [promptAuthentication, setPromptAuthentication] = useState(false);
+  const [user, setUser] = useState({});
 
   const [audioContext, setAudioContext] = useState(null);
 
   useEffect(() => {
     setAudioContext(new AudioContext());
+    localStorage.getItem('githubAuthToken') && setAuthenticated(true);
+    fetch('/auth/user')
+      .then(res => res.json())
+      .then(user => {
+        if (user) {
+          setAuthenticated(true);
+          localStorage.setItem('githubAuthToken', user.access_token);
+          localStorage.setItem('userDetails', JSON.stringify(user));
+          setUser(user);
+        }
+      })
 
     return () => {
       if (audioContext) {
@@ -90,7 +104,7 @@ const App = () => {
   const fetchAllCommits = async () => {
     try {
       setIsLoading(true);
-      const response = await axios.get(`https://api.github.com/repos/${repository}/commits?per_page=100`);
+      const response = await axios(`https://api.github.com/repos/${repository}/commits?per_page=100`);
       let allCommits = [...response.data];
       let i = 0;
       let nextPage = getNextPage(response.headers.link);
@@ -99,6 +113,13 @@ const App = () => {
         const nextPageResponse = await axios.get(nextPage);
         allCommits = [...allCommits, ...nextPageResponse.data];
         nextPage = getNextPage(nextPageResponse.headers.link);
+        if (allCommits.length > 20 && !authenticated) {
+          // Prompt the user to log in with GitHub
+          // Implement GitHub OAuth flow here
+          setPromptAuthentication(true);
+          setError('This repo has more commits than we can process, login with GitHub to avoid Github API rate limits.');
+          return;
+        }
       }
       allCommits = allCommits.reverse();
       console.log(allCommits);
@@ -191,6 +212,7 @@ const App = () => {
 
   return (
     <div className="App">
+      {authenticated && user &&  <h3>Welcome, {user.login}</h3>}
       <h1>Tune for your repo</h1>
       <form onSubmit={handleSubmit}>
         <label htmlFor="repository">Repository:</label>
@@ -204,6 +226,7 @@ const App = () => {
         <button type="submit" disabled={isLoading}>{isLoading ? 'Loading...' : 'Submit'}</button>
       </form>
       {error && <p>{error}</p>}
+      {!authenticated && promptAuthentication && <a href="https://github.com/login/oauth/authorize?client_id=0962e87303b69b832dc7">Login with Github</a>}
       <div className="visualizer">
         <div className="visualizer-bar"></div>
         <div className="visualizer-bar"></div>
